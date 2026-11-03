@@ -1,0 +1,581 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  KITCHEN_OWNER
+  KITCHEN_STAFF
+  PLATFORM_ADMIN
+}
+
+enum MembershipRole {
+  OWNER
+  MANAGER
+  CHEF
+  STAFF
+}
+
+enum OrderSource {
+  DIRECT_ONLINE
+  PHONE_TAKEAWAY
+  DINE_IN
+  CSV_IMPORT
+  SWIGGY_ADAPTER
+  ZOMATO_ADAPTER
+  OTHER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY_FOR_PICKUP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum MovementType {
+  RESTOCK
+  ORDER_DEDUCTION
+  SPOILAGE_WASTE
+  AUDIT_ADJUSTMENT
+  RETURN
+}
+
+enum RecommendationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  DISMISSED
+}
+
+enum NotificationType {
+  NEW_ORDER
+  ORDER_STATUS
+  LOW_STOCK
+  PRICING_ALERT
+  SYSTEM
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  PENDING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+model User {
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  passwordHash        String
+  fullName            String
+  phone               String?
+  role                UserRole             @default(KITCHEN_OWNER)
+  isActive            Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  memberships         KitchenMembership[]
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  auditLogs           AuditLog[]
+  pricingDecisions    PricingRecommendation[]
+  orderStatusChanges  OrderStatusHistory[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Kitchen {
+  id                   String                  @id @default(uuid())
+  name                 String
+  slug                 String                  @unique
+  description          String?
+  address              String?
+  city                 String?
+  state                String?
+  pincode              String?
+  phone                String?
+  email                String?
+  fssaiNumber          String?
+  gstNumber            String?
+  defaultTargetMargin  Decimal                 @default(0.65) @db.Decimal(5, 4)
+  currency             String                  @default("INR")
+  timezone             String                  @default("Asia/Kolkata")
+  isActive             Boolean                 @default(true)
+  onboardingCompleted Boolean                 @default(false)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  memberships          KitchenMembership[]
+  categories           MenuCategory[]
+  menuItems            MenuItem[]
+  ingredients          Ingredient[]
+  recipes              Recipe[]
+  inventoryItems       InventoryItem[]
+  inventoryMovements   InventoryMovement[]
+  customers            Customer[]
+  orders               Order[]
+  deliveryRecords      DeliveryRecord[]
+  recommendations      PricingRecommendation[]
+  notifications        Notification[]
+  subscription         KitchenSubscription?
+  auditLogs            AuditLog[]
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+model KitchenMembership {
+  id          String         @id @default(uuid())
+  userId      String
+  kitchenId   String
+  role        MembershipRole @default(OWNER)
+  permissions String[]       @default([])
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kitchen     Kitchen        @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kitchenId])
+  @@index([kitchenId])
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([userId])
+}
+
+model MenuCategory {
+  id          String     @id @default(uuid())
+  kitchenId   String
+  name        String
+  description String?
+  sortOrder   Int        @default(0)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  kitchen     Kitchen    @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  menuItems   MenuItem[]
+
+  @@unique([kitchenId, name])
+  @@index([kitchenId])
+}
+
+model MenuItem {
+  id              String         @id @default(uuid())
+  kitchenId       String
+  categoryId      String?
+  name            String
+  description     String?
+  imageUrl        String?
+  sellingPrice    Decimal        @db.Decimal(10, 2)
+  costPrice       Decimal        @db.Decimal(10, 2)
+  prepTimeMinutes Int            @default(15)
+  isAvailable     Boolean        @default(true)
+  isArchived      Boolean        @default(false)
+  tags            String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  kitchen         Kitchen        @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  category        MenuCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  recipe          Recipe?
+  orderItems      OrderItem[]
+  recommendations PricingRecommendation[]
+
+  @@index([kitchenId])
+  @@index([categoryId])
+  @@index([isAvailable])
+  @@index([isArchived])
+}
+
+model Ingredient {
+  id                 String             @id @default(uuid())
+  kitchenId          String
+  name               String
+  category           String?
+  unit               String
+  defaultCostPerUnit Decimal            @db.Decimal(10, 2)
+  isArchived         Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  kitchen            Kitchen            @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  recipeIngredients  RecipeIngredient[]
+  inventoryItem      InventoryItem?
+
+  @@unique([kitchenId, name])
+  @@index([kitchenId])
+}
+
+model Recipe {
+  id            String             @id @default(uuid())
+  kitchenId     String
+  menuItemId    String             @unique
+  notes         String?
+  yieldQuantity Int                @default(1)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  kitchen       Kitchen            @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  menuItem      MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  ingredients   RecipeIngredient[]
+
+  @@index([kitchenId])
+}
+
+model RecipeIngredient {
+  id           String     @id @default(uuid())
+  recipeId     String
+  ingredientId String
+  quantity     Decimal    @db.Decimal(10, 4)
+  unit         String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  recipe       Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@unique([recipeId, ingredientId])
+  @@index([recipeId])
+  @@index([ingredientId])
+}
+
+model InventoryItem {
+  id                 String              @id @default(uuid())
+  kitchenId          String
+  ingredientId       String?             @unique
+  name               String
+  category           String?
+  unit               String
+  currentStock       Decimal             @db.Decimal(10, 3)
+  minStockThreshold  Decimal             @db.Decimal(10, 3)
+  unitCost           Decimal             @db.Decimal(10, 2)
+  supplierName       String?
+  lastRestockedAt    DateTime?
+  expiryDate         DateTime?
+  isArchived         Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  kitchen            Kitchen             @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  ingredient         Ingredient?         @relation(fields: [ingredientId], references: [id], onDelete: SetNull)
+  movements          InventoryMovement[]
+
+  @@index([kitchenId])
+  @@index([ingredientId])
+  @@index([isArchived])
+}
+
+model InventoryMovement {
+  id               String        @id @default(uuid())
+  kitchenId        String
+  inventoryItemId  String
+  orderId          String?
+  movementType     MovementType
+  quantityChange   Decimal       @db.Decimal(10, 3)
+  previousStock    Decimal       @db.Decimal(10, 3)
+  newStock         Decimal       @db.Decimal(10, 3)
+  unitCostAtTime   Decimal?      @db.Decimal(10, 2)
+  reason           String?
+  performedByUserId String?
+  createdAt        DateTime      @default(now())
+
+  kitchen          Kitchen       @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  order            Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([kitchenId])
+  @@index([inventoryItemId])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+model Customer {
+  id               String   @id @default(uuid())
+  kitchenId        String
+  name             String
+  phone            String?
+  email            String?
+  address          String?
+  totalOrdersCount Int      @default(0)
+  totalSpent       Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  kitchen          Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  orders           Order[]
+
+  @@index([kitchenId])
+  @@index([phone])
+}
+
+model Order {
+  id                 String              @id @default(uuid())
+  orderNumber        String
+  kitchenId          String
+  customerId         String?
+  customerName       String
+  customerPhone      String?
+  customerAddress    String?
+  source             OrderSource         @default(DIRECT_ONLINE)
+  externalReference  String?
+  status             OrderStatus         @default(PENDING)
+  paymentStatus      PaymentStatus       @default(PENDING)
+  paymentMethod      String?
+  subtotal           Decimal             @db.Decimal(10, 2)
+  taxAmount          Decimal             @default(0) @db.Decimal(10, 2)
+  discountAmount     Decimal             @default(0) @db.Decimal(10, 2)
+  deliveryFee        Decimal             @default(0) @db.Decimal(10, 2)
+  totalAmount        Decimal             @db.Decimal(10, 2)
+  notes              String?
+  cancellationReason String?
+  cancelledAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  kitchen            Kitchen             @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items              OrderItem[]
+  statusHistory      OrderStatusHistory[]
+  deliveryRecord     DeliveryRecord?
+  inventoryMovements InventoryMovement[]
+
+  @@unique([kitchenId, orderNumber])
+  @@index([kitchenId])
+  @@index([status])
+  @@index([source])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id                 String   @id @default(uuid())
+  orderId            String
+  menuItemId         String?
+  itemName           String
+  unitPrice          Decimal  @db.Decimal(10, 2)
+  costPriceSnapshot  Decimal  @db.Decimal(10, 2)
+  quantity           Int
+  subtotal           Decimal  @db.Decimal(10, 2)
+  notes              String?
+  createdAt          DateTime @default(now())
+
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem           MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+model OrderStatusHistory {
+  id              String      @id @default(uuid())
+  orderId         String
+  fromStatus      OrderStatus?
+  toStatus        OrderStatus
+  changedByUserId String?
+  comment         String?
+  timestamp       DateTime    @default(now())
+
+  order           Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedByUser   User?       @relation(fields: [changedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([timestamp])
+}
+
+model DeliveryRecord {
+  id                     String    @id @default(uuid())
+  orderId                String    @unique
+  kitchenId              String
+  deliveryPartner        String?
+  riderName              String?
+  riderPhone             String?
+  prepStartTime          DateTime?
+  prepEndTime            DateTime?
+  dispatchTime           DateTime?
+  estimatedDeliveryTime  DateTime?
+  actualDeliveryTime     DateTime?
+  prepDurationMinutes    Int?
+  deliveryDurationMinutes Int?
+  isDelayed              Boolean   @default(false)
+  delayReason            String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  order                  Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  kitchen                Kitchen   @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+
+  @@index([kitchenId])
+  @@index([orderId])
+  @@index([isDelayed])
+}
+
+model PricingRecommendation {
+  id                   String               @id @default(uuid())
+  kitchenId            String
+  menuItemId           String
+  currentPrice         Decimal              @db.Decimal(10, 2)
+  estimatedCost        Decimal              @db.Decimal(10, 2)
+  currentContribution  Decimal              @db.Decimal(10, 2)
+  targetMargin         Decimal              @db.Decimal(5, 4)
+  candidatePrice       Decimal              @db.Decimal(10, 2)
+  suggestedMinPrice    Decimal              @db.Decimal(10, 2)
+  suggestedMaxPrice    Decimal              @db.Decimal(10, 2)
+  historicalSalesCount Int                  @default(0)
+  demandTrend          String               @default("INSUFFICIENT_DATA")
+  confidenceScore      Decimal              @default(0.50) @db.Decimal(3, 2)
+  status               RecommendationStatus @default(PENDING)
+  reason               String
+  decisionTimestamp    DateTime?
+  decidedByUserId      String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  kitchen              Kitchen              @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  menuItem             MenuItem             @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  decidedByUser        User?                @relation(fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([kitchenId])
+  @@index([menuItemId])
+  @@index([status])
+}
+
+model Notification {
+  id            String           @id @default(uuid())
+  kitchenId     String
+  title         String
+  message       String
+  type          NotificationType @default(SYSTEM)
+  referenceId   String?
+  referenceType String?
+  isRead        Boolean          @default(false)
+  readAt        DateTime?
+  createdAt     DateTime         @default(now())
+
+  kitchen       Kitchen          @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+
+  @@index([kitchenId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model SubscriptionPlan {
+  id                 String                @id @default(uuid())
+  code               String                @unique
+  name               String
+  description        String
+  monthlyPrice       Decimal               @db.Decimal(10, 2)
+  annualPrice        Decimal?              @db.Decimal(10, 2)
+  maxOrdersPerMonth  Int?
+  maxMenuItems       Int?
+  maxStaffMembers    Int?
+  features           String[]              @default([])
+  isActive           Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  subscriptions      KitchenSubscription[]
+
+  @@index([code])
+}
+
+model KitchenSubscription {
+  id                 String             @id @default(uuid())
+  kitchenId          String             @unique
+  planId             String
+  status             SubscriptionStatus @default(TRIAL)
+  isDemoSubscription Boolean            @default(true)
+  startedAt          DateTime           @default(now())
+  expiresAt          DateTime?
+  trialEndsAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  kitchen            Kitchen            @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  plan               SubscriptionPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([kitchenId])
+  @@index([planId])
+  @@index([status])
+}
+
+model ContactMessage {
+  id           String    @id @default(uuid())
+  name         String
+  email        String
+  businessName String?
+  subject      String
+  message      String
+  status       String    @default("UNREAD")
+  respondedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  kitchenId  String?
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  details    String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  kitchen    Kitchen? @relation(fields: [kitchenId], references: [id], onDelete: SetNull)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([kitchenId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
